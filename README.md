@@ -1,0 +1,2 @@
+# kriptografi
+.venv# kriptografi
