@@ -158,9 +158,12 @@ def affine_menu():
             display_matrix_properties(first_row, props)
             
             # Save button
-            if st.button("💾 Save for S-Box", key="save_custom"):
-                st.session_state.saved_first_row = first_row
-                st.success("✅ Matrix berhasil disimpan! Buka menu S-Box untuk menggunakannya.")
+        if st.button("💾 Save for S-Box", key="save_custom"):
+                    st.session_state.saved_first_row = first_row
+                    # Clear previous test results when user saves a new first_row
+                    if "test_results" in st.session_state:
+                        del st.session_state["test_results"]
+                    st.success("✅ Matrix berhasil disimpan! Buka menu S-Box untuk menggunakannya.")
         
         elif input_type == "Binary String" and first_row is None:
             st.info("ℹ️ Masukkan binary string yang valid untuk melanjutkan")
@@ -219,6 +222,8 @@ def affine_menu():
         # Save button
         if st.button("💾 Save for S-Box", key="save_example"):
             st.session_state.saved_first_row = first_row
+            if "test_results" in st.session_state:
+                del st.session_state["test_results"]
             st.success("✅ Matrix berhasil disimpan! Buka menu S-Box untuk menggunakannya.")
 
     # =========================
@@ -258,7 +263,8 @@ def affine_menu():
             "Affine Matrix Index",
             min_value=0,
             max_value=2**8 - 1,
-            value=7
+            value=7,
+            key="affine_idx"
         )
         first_row = index_to_first_row(idx)
         matrix = generate_affine_matrix(first_row)
@@ -270,9 +276,20 @@ def affine_menu():
         st.markdown("#### Properties")
         display_matrix_properties(first_row, props)
         
+        # Clear previous test results when user changes the index (without needing to press Save)
+        prev_idx = st.session_state.get("_last_affine_idx", None)
+        if prev_idx is None:
+            st.session_state["_last_affine_idx"] = idx
+        elif prev_idx != idx:
+            if "test_results" in st.session_state:
+                del st.session_state["test_results"]
+            st.session_state["_last_affine_idx"] = idx
+
         # Save button
         if st.button("💾 Save for S-Box", key="save_index"):
             st.session_state.saved_first_row = first_row
+            if "test_results" in st.session_state:
+                del st.session_state["test_results"]
             st.success("✅ Matrix berhasil disimpan! Buka menu S-Box untuk menggunakannya.")
 
     # =========================

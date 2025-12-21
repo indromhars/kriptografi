@@ -179,7 +179,7 @@ def calculate_sac(sbox_values):
 
     avg_sac = float(np.mean(sac_matrix))
     per_input_avg = [float(np.mean(sac_matrix[i, :])) for i in range(n)]
-    return avg_sac, per_input_avg
+    return avg_sac, per_input_avg, sac_matrix
 
 def calculate_bic_sac(sbox_values):
     """
@@ -309,7 +309,7 @@ def calculate_strength_values(metrics):
     dap, du = metrics['dap']
     _, to_values = metrics['transparency_order']
     avg_to = np.mean(to_values)
-    avg_sac, _ = metrics['sac']
+    avg_sac = metrics['sac'][0]
     ci = metrics['correlation_immunity']
     
     sv_paper = (nl / 128) * 2 + (1 - lap) * 8 + (1 - dap) * 4 + (8 - du) / 2 + (1 - avg_to) * 2
@@ -419,7 +419,7 @@ def sbox_testing_menu():
                     bic_sac = calculate_bic_sac(sbox_values)
                     
                     # 7.5 Final S score (new)
-                    avg_sac, _ = sac_result
+                    avg_sac = sac_result[0]
                     s_value = calculate_final_score(avg_sac, bic_sac)
                     
                     # 8. Transparency Order
@@ -456,6 +456,7 @@ def sbox_testing_menu():
                     "s_value": s_value,
                     "nl": nonlinearity[0],
                     "du": dap_result[1],
+                    "to": float(to_result[0]),
                     "lap": lap_result[0],
                     "sac": float(sac_result[0]),
                     "timestamp": timestamp
@@ -479,9 +480,10 @@ def sbox_testing_menu():
                     st.metric("Nonlinearity (NL)", f"{nl}")
                     st.metric("BIC-NL", f"{bic_nl}")
                     st.metric("LAP", f"{lap_result[0]:.6f}")
+                    st.metric("CI", f"{ci}")
                 
                 with col2:
-                    avg_sac, _ = sac_result
+                    avg_sac = sac_result[0]
                     st.metric("SAC", f"{avg_sac:.6f}")
                     st.metric("BIC-SAC", f"{bic_sac:.6f}")
                     st.metric("DAP", f"{dap_result[0]:.6f}")
@@ -492,7 +494,8 @@ def sbox_testing_menu():
                     avg_to, _ = to_result
                     st.metric("DU", f"{du}")
                     st.metric("AD", f"{avg_ad:.6f}")
-                    st.metric("CI", f"{ci}")
+                    st.metric("TO", f"{avg_to:.6f}")
+                    
 
                 # Display Final S score under Strength Assessment
                 st.markdown("---")
@@ -622,6 +625,7 @@ INTERPRETATION
                         file_name="sbox_evaluation_report.json",
                         mime="application/json"
                     )
+            
     
     # Detailed Analysis Tab
     with testing_tabs[1]:
@@ -671,7 +675,7 @@ INTERPRETATION
                 st.write("SAC measures if changing 1 input bit results in changing half of the output bits on average. This ensures high diffusion.")
                 st.info("Ideal value: 0.5")
 
-                avg_sac, sac_per_bit = results['sac']
+                avg_sac, sac_per_bit, sac_matrix = results['sac']
                 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Overall SAC", f"{avg_sac:.5f}")
@@ -737,7 +741,8 @@ INTERPRETATION
             # Pilihan Visualisasi
             viz_choice = st.selectbox(
                 "Pilih tipe visualisasi:",
-                ["Strength Radar Chart", "SAC Distribution Heatmap", "Comparison vs AES Standard"]
+                ["Strength Radar Chart", "SAC Distribution Heatmap", "Comparison vs AES Standard"],
+                key="sbox_viz_choice"
             )
 
             st.markdown("---")
@@ -795,36 +800,37 @@ INTERPRETATION
             elif viz_choice == "SAC Distribution Heatmap":
                 st.subheader("Strict Avalanche Criterion (SAC) Matrix")
                 st.write("Heatmap ini menunjukkan rata-rata perubahan bit output ketika bit input tertentu diubah.")
-                
-                # Mengambil data per-input average dari results['sac'][1]
-                # Format: [avg_bit_0, avg_bit_1, ...]
-                _, per_input_avg = results['sac']
-                
-                # Karena kita tidak menyimpan full 8x8 matrix di calculate_sac saat ini,
-                # kita visualisasikan per-input distribution (Baris berbeda, Kolom sama)
-                # Ini menunjukkan input bit mana yang paling lemah menyebarkan perubahan.
-                
-                # Membuat matriks replikasi untuk visualisasi (8 baris input x 1 kolom rata-rata)
-                sac_display = np.array(per_input_avg).reshape(8, 1)
-                
-                fig = px.imshow(
-                    sac_display,
-                    labels=dict(x="Avg Output Change", y="Input Bit Flipped", color="SAC Value"),
-                    x=["Average Output"],
-                    y=[f'Input Bit {i}' for i in range(8)],
-                    color_continuous_scale='RdBu_r', # Merah-Biru
-                    range_color=[0.4, 0.6],           # Ideal 0.5 di tengah (putih)
-                    aspect="auto"
-                )
-                
-                # Menambahkan anotasi angka
-                fig.update_traces(text=np.around(sac_display, 4), texttemplate="%{text}", textfont_size=12)
-                
-                fig.update_layout(
-                    height=500,
-                    title="SAC Value per Input Bit (Ideal: 0.5 / Putih)"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+
+                # Mengambil data full 8x8 matrix dari results['sac']
+                try:
+                    avg_sac, per_input_avg, sac_matrix = results['sac']
+
+                    # Ensure sac_matrix is a plain 2D array / DataFrame to avoid plotting issues
+                    sac_arr = np.array(sac_matrix, dtype=float)
+                    x_labels = [f'Output Bit {j}' for j in range(sac_arr.shape[1])]
+                    y_labels = [f'Input Bit {i}' for i in range(sac_arr.shape[0])]
+
+                    df_sac = pd.DataFrame(sac_arr, index=y_labels, columns=x_labels)
+
+                    fig = px.imshow(
+                        df_sac.values,
+                        labels=dict(x="Output Bit", y="Input Bit", color="SAC Value"),
+                        x=df_sac.columns.tolist(),
+                        y=df_sac.index.tolist(),
+                        color_continuous_scale='RdBu_r',
+                        range_color=[0.4, 0.6],
+                        text_auto='.3f'
+                    )
+
+                    fig.update_layout(
+                        title="SAC Matrix (Input bit flipped → Output bit change probability)",
+                        margin=dict(t=40, b=40, l=40, r=40),
+                        height=600
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error rendering SAC heatmap: {e}")
                 
                 st.info("Keterangan: Warna **Merah/Biru Tua** menandakan penyimpangan dari nilai ideal 0.5. Warna **Putih/Pucat** menandakan properti Avalanche yang baik.")
 
@@ -881,7 +887,7 @@ INTERPRETATION
             nl, _, _ = results['nonlinearity']
             lap, _ = results['lap']
             dap, du = results['dap']
-            avg_sac, _ = results['sac']
+            avg_sac = results['sac'][0]
             avg_ad, _ = results['avalanche']
             bic_sac = results['bic_sac']
             avg_to, _ = results['transparency_order']

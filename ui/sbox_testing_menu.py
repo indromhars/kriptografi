@@ -1,261 +1,135 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
-from collections import Counter
-
-def calculate_sbox_metrics(sbox_values):
-    """Calculate all S-Box metrics"""
-    metrics = {}
-    sbox = np.array(sbox_values)
-    
-    # 1. Nonlinearity (NL)
-    nl_values = []
-    for output_bit in range(8):
-        nl_bit = 256
-        for mask in range(1, 256):
-            xor_sum = 0
-            for x in range(256):
-                if (sbox[x] >> output_bit) & 1 == ((bin(x).count('1') + bin(mask).count('1')) % 2):
-                    xor_sum += 1
-            nl_bit = min(nl_bit, abs(xor_sum - 128))
-        nl_values.append(nl_bit)
-    metrics['Nonlinearity'] = min(nl_values)
-    
-    # 2. SAC (Strict Avalanche Criterion)
-    sac_values = []
-    for i in range(8):
-        sac_bit_count = 0
-        for x in range(256):
-            x_flip = x ^ (1 << i)
-            if x_flip < 256:
-                diff = bin(sbox[x] ^ sbox[x_flip]).count('1')
-                if diff == 4:  # Half of 8 bits
-                    sac_bit_count += 1
-        sac_values.append(sac_bit_count / 256)
-    metrics['SAC'] = np.mean(sac_values)
-    
-    # 3. BIC-NL (Bit Independence Criterion - Nonlinearity)
-    metrics['BIC-NL'] = metrics['Nonlinearity']
-    
-    # 4. BIC-SAC (Bit Independence Criterion - SAC)
-    metrics['BIC-SAC'] = metrics['SAC']
-    
-    # 5. LAP (Linear Approximation Probability)
-    lap_max = 0
-    for mask_in in range(1, 256):
-        for mask_out in range(1, 256):
-            count = sum(1 for x in range(256) if bin(x & mask_in).count('1') % 2 == bin(sbox[x] & mask_out).count('1') % 2)
-            lap = abs(count - 128) / 256
-            lap_max = max(lap_max, lap)
-    metrics['LAP'] = lap_max
-    
-    # 6. DAP (Differential Approximation Probability)
-    dap_max = 0
-    for delta_in in range(1, 256):
-        for delta_out in range(256):
-            count = sum(1 for x in range(256) if sbox[x] ^ sbox[x ^ delta_in] == delta_out)
-            dap = count / 256
-            dap_max = max(dap_max, dap)
-    metrics['DAP'] = dap_max
-    
-    # 7. Differential Uniformity (DU)
-    du = 0
-    for delta_in in range(1, 256):
-        for delta_out in range(256):
-            count = sum(1 for x in range(256) if sbox[x] ^ sbox[x ^ delta_in] == delta_out)
-            du = max(du, count)
-    metrics['DU'] = du
-    
-    # 8. Algebraic Degree (AD)
-    metrics['AD'] = 7  # Typical for 8-bit S-boxes
-    
-    # 9. Transparency Order (TO)
-    to_values = []
-    for delta in range(1, 256):
-        xor_count = sum(1 for x in range(256) if bin(sbox[x] ^ sbox[x ^ delta]).count('1') == 4)
-        to_values.append(xor_count / 256)
-    metrics['TO'] = np.mean(to_values)
-    
-    # 10. Correlation Immunity (CI)
-    metrics['CI'] = 0
-    
-    return metrics
-
-def calculate_strength_values(metrics):
-    """Calculate Strength Values and Extended Score"""
-    sv_paper = (metrics['Nonlinearity'] / 128) * 2 + (1 - metrics['LAP']) * 8 + (1 - metrics['DAP']) * 4 + (8 - metrics['DU']) / 2 + (1 - metrics['TO']) * 2
-    extended_score = sv_paper + (metrics['SAC'] * 2) + (metrics['CI'] * 0.5)
-    
-    excellent_count = 0
-    if metrics['Nonlinearity'] >= 112:
-        excellent_count += 1
-    if metrics['SAC'] >= 0.5:
-        excellent_count += 1
-    if metrics['LAP'] <= 0.0625:
-        excellent_count += 1
-    if metrics['DAP'] <= 0.02:
-        excellent_count += 1
-    if metrics['DU'] <= 4:
-        excellent_count += 1
-    if metrics['TO'] <= 0.15:
-        excellent_count += 1
-    if metrics['AD'] >= 6:
-        excellent_count += 1
-    if metrics['CI'] >= 1:
-        excellent_count += 1
-    if metrics['BIC-NL'] >= 100:
-        excellent_count += 1
-    if metrics['BIC-SAC'] >= 0.45:
-        excellent_count += 1
-    
-    return sv_paper, extended_score, excellent_count
+import plotly.graph_objects as go
+import plotly.express as px
+from core.metrics import calculate_sbox_metrics
 
 def sbox_testing_menu():
-    st.header("🧪 S-Box Testing")
+    st.header("🧪 S-Box Testing & Cryptographic Evaluation")
     
-    testing_tabs = st.tabs([
-        "Quick Summary",
-        "Detailed Tests",
-        "Visualizations",
-        "Compare With Standards"
-    ])
+    if "validation_results" not in st.session_state:
+        st.info("💡 Jalankan validasi terlebih dahulu di menu S-Box Construction")
+        return
+
+    sbox_values = st.session_state.validation_results['sbox']
     
-    # Quick Summary Tab
-    with testing_tabs[0]:
-        st.subheader("Quick Summary")
-        
-        if "validation_results" not in st.session_state:
-            st.info("💡 Jalankan validasi terlebih dahulu di tab 'Validation' di menu S-Box")
-        else:
-            sbox_values = st.session_state.validation_results['sbox']
+    # Menambahkan tab Comparison agar tidak kosong
+    tabs = st.tabs(["📊 Quick Summary", "🔍 Detailed Analysis", "📈 Visualizations", "⚖️ Comparison"])
+
+    # --- TAB 0: QUICK SUMMARY ---
+    with tabs[0]:
+        if st.button("🚀 Run Full Analysis"):
+            with st.spinner("Calculating complex metrics... (LAP takes time)"):
+                res = calculate_sbox_metrics(sbox_values)
+                st.session_state.test_results = res
+            st.rerun()
+
+        if "test_results" in st.session_state:
+            res = st.session_state.test_results
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Nonlinearity (NL)", res['nl_min'])
+            c1.metric("BIC-NL", res['bic_nl'])
+            c2.metric("SAC (Avg)", f"{res['sac_avg']:.5f}")
+            c2.metric("BIC-SAC", f"{res['bic_sac']:.5f}")
+            c3.metric("LAP", f"{res['lap']:.5f}")
+            c3.metric("DAP", f"{res['dap']:.5f}")
             
-            if st.button("🔍 Run Tests", key="run_tests"):
-                with st.spinner("Calculating metrics..."):
-                    metrics = calculate_sbox_metrics(sbox_values)
-                    sv_paper, extended_score, excellent_count = calculate_strength_values(metrics)
-                    
-                    st.session_state.test_results = {
-                        'metrics': metrics,
-                        'sv_paper': sv_paper,
-                        'extended_score': extended_score,
-                        'excellent_count': excellent_count
-                    }
-                
-                # Display Core Metrics
-                st.markdown("### 📊 Test Result Summary")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("Nonlinearity (NL)", f"{metrics['Nonlinearity']}")
-                    st.metric("BIC-NL", f"{metrics['BIC-NL']}")
-                    st.metric("LAP", f"{metrics['LAP']:.6f}")
-                    st.metric("DU", f"{metrics['DU']}")
-                
-                with col2:
-                    st.metric("SAC", f"{metrics['SAC']:.6f}")
-                    st.metric("BIC-SAC", f"{metrics['BIC-SAC']:.6f}")
-                    st.metric("DAP", f"{metrics['DAP']:.6f}")
-                    st.metric("AD", f"{metrics['AD']}")
-                
-                with col3:
-                    st.metric("TO", f"{metrics['TO']:.6f}")
-                    st.metric("CI", f"{metrics['CI']}")
-                
-                # Overall Assessment
-                st.markdown("---")
-                st.markdown("### 📈 Overall Assessment")
-                
-                assess_col1, assess_col2, assess_col3 = st.columns(3)
-                
-                with assess_col1:
-                    st.metric("SV (Paper)", f"{sv_paper:.6f}")
-                
-                with assess_col2:
-                    st.metric("Extended Score", f"{extended_score:.6f}")
-                
-                with assess_col3:
-                    st.metric("Excellent Criteria", f"{excellent_count}/10")
-                
-                # Status indicator
-                if excellent_count >= 8:
-                    st.success(f"✅ **EXCELLENT** - {excellent_count}/10 criteria met")
-                elif excellent_count >= 6:
-                    st.info(f"✅ **GOOD** - {excellent_count}/10 criteria met")
-                elif excellent_count >= 4:
-                    st.warning(f"⚠️ **FAIR** - {excellent_count}/10 criteria met")
-                else:
-                    st.error(f"❌ **POOR** - {excellent_count}/10 criteria met")
-                
-                # Download Results
-                st.markdown("---")
-                st.markdown("### 📥 Download Results")
-                
-                report_text = f"""S-box Test Results
-==================
+            st.divider()
+            st.metric("Final S Score (Lower is better)", f"{res['final_s']:.6f}")
 
-Core Metrics (from paper):
---------------------------
-Nonlinearity (NL): {metrics['Nonlinearity']}
-SAC: {metrics['SAC']:.6f}
-BIC-NL: {metrics['BIC-NL']}
-BIC-SAC: {metrics['BIC-SAC']:.6f}
-LAP: {metrics['LAP']:.6f}
-DAP: {metrics['DAP']:.6f}
+    # --- TAB 1: DETAILED ANALYSIS ---
+    with tabs[1]:
+        if "test_results" in st.session_state:
+            res = st.session_state.test_results
+            selected = st.selectbox("Select test to view details:", 
+                ["Nonlinearity (NL)", "Strict Avalanche Criterion (SAC)", "BIC-NL/SAC", "Linear/Differential"])
+            
+            if selected == "Nonlinearity (NL)":
+                st.subheader("Nonlinearity Test")
+                st.info("Ideal value: 112 for 8-bit S-boxes")
+                nl_df = pd.DataFrame({
+                    "Output Bit": [f"f_{i}" for i in range(8)],
+                    "NL Value": res['nl_per_bit'],
+                    "Status": ["✅" if x >= 112 else "⚠️" for x in res['nl_per_bit']]
+                })
+                st.table(nl_df)
 
-Additional Metrics:
--------------------
-Differential Uniformity (DU): {metrics['DU']}
-Algebraic Degree (AD): {metrics['AD']}
-Transparency Order (TO): {metrics['TO']:.6f}
-Correlation Immunity (CI): {metrics['CI']}
+            elif selected == "Strict Avalanche Criterion (SAC)":
+                st.subheader("SAC Detail per Input Bit")
+                st.write("Target ideal: 0.5000")
+                sac_df = pd.DataFrame({
+                    "Input Bit Flip": [f"e_{i}" for i in range(8)],
+                    "SAC Value": [f"{x:.5f}" for x in res['sac_per_bit']],
+                    "Status": ["✅" if abs(x-0.5) < 0.05 else "⚠️" for x in res['sac_per_bit']]
+                })
+                st.table(sac_df)
+            
+            # ... bisa tambahkan detail untuk BIC atau LAP di sini ...
 
-Strength Values:
-----------------
-SV (Paper): {sv_paper:.6f}
-Extended Score: {extended_score:.6f}
-Excellent Criteria: {excellent_count}/10
-"""
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.download_button(
-                        label="📥 Download .txt",
-                        data=report_text,
-                        file_name="sbox_test_results.txt",
-                        mime="text/plain"
-                    )
-                
-                with col2:
-                    import json
-                    json_report = {
-                        "metrics": {k: float(v) if isinstance(v, (int, float)) else v for k, v in metrics.items()},
-                        "strength_values": {
-                            "sv_paper": float(sv_paper),
-                            "extended_score": float(extended_score),
-                            "excellent_criteria": excellent_count
-                        }
-                    }
-                    
-                    st.download_button(
-                        label="📥 Download .json",
-                        data=json.dumps(json_report, indent=2),
-                        file_name="sbox_test_results.json",
-                        mime="application/json"
-                    )
-    
-    # Detailed Tests Tab
-    with testing_tabs[1]:
-        st.subheader("Detailed Tests")
-        st.markdown("Detailed test analysis and explanations coming soon...")
-    
-    # Visualizations Tab
-    with testing_tabs[2]:
-        st.subheader("Visualizations")
-        st.markdown("Visualization of test metrics coming soon...")
-    
-    # Compare With Standards Tab
-    with testing_tabs[3]:
-        st.subheader("Compare With Standards")
-        st.markdown("Comparison with standard S-boxes (AES, DES, etc.) coming soon...")
+    # --- TAB 2: VISUALIZATIONS ---
+    with tabs[2]:
+        if "test_results" in st.session_state:
+            res = st.session_state.test_results
+            v_choice = st.selectbox("Select visualization:", ["Overview Radar Chart", "SAC Heatmap (8x8)"])
+            
+            if v_choice == "Overview Radar Chart":
+                metrics = {
+                    'NL': res['nl_min'] / 112,
+                    'SAC': 1 - abs(res['sac_avg'] - 0.5) / 0.5,
+                    'LAP (Inv)': 0.0625 / max(res['lap'], 0.001),
+                    'DAP (Inv)': 0.0156 / max(res['dap'], 0.001),
+                    'BIC-NL': res['bic_nl'] / 112
+                }
+                fig = go.Figure(go.Scatterpolar(r=list(metrics.values()) + [list(metrics.values())[0]], 
+                                              theta=list(metrics.keys()) + [list(metrics.keys())[0]], fill='toself'))
+                fig.update_layout(polar=dict(radialaxis=dict(range=[0, 1.2])), title="Normalized Strength (1.0 = Ideal)")
+                st.plotly_chart(fig)
+
+            elif v_choice == "SAC Heatmap (8x8)":
+                st.subheader("Full 8x8 SAC Matrix")
+                # Ini yang memastikan heatmap tidak gepeng (8 baris x 8 kolom)
+                fig = px.imshow(res['sac_matrix'], 
+                                labels=dict(x="Output Bit Index", y="Input Bit Flip", color="Probability"),
+                                x=[f'Out {i}' for i in range(8)], 
+                                y=[f'In {i}' for i in range(8)],
+                                color_continuous_scale='RdBu_r', 
+                                range_color=[0.4, 0.6], 
+                                text_auto='.3f')
+                fig.update_layout(width=700, height=700)
+                st.plotly_chart(fig)
+
+    # --- TAB 3: COMPARISON (Sesuai Data Jurnal Halaman 17) ---
+    with tabs[3]:
+        st.subheader("Comparison with AES Standard")
+        if "test_results" in st.session_state:
+            res = st.session_state.test_results
+            
+            # Data dari Tabel 19 di Jurnal
+            comparison_data = {
+                "Metric": ["NL", "SAC", "BIC-NL", "BIC-SAC", "LAP", "DAP"],
+                "AES Standard [1]": [112, 0.50488, 112, 0.50460, 0.0625, 0.01563],
+                "Current S-Box": [
+                    res['nl_min'], 
+                    round(res['sac_avg'], 5), 
+                    res['bic_nl'], 
+                    round(res['bic_sac'], 5), 
+                    round(res['lap'], 4), 
+                    round(res['dap'], 5)
+                ]
+            }
+            df_comp = pd.DataFrame(comparison_data)
+            st.table(df_comp)
+
+            # Bar Chart Comparison
+            st.markdown("### Visualization: Current vs AES")
+            fig_comp = go.Figure()
+            fig_comp.add_trace(go.Bar(x=df_comp["Metric"], y=df_comp["AES Standard [1]"], name='AES Standard'))
+            fig_comp.add_trace(go.Bar(x=df_comp["Metric"], y=df_comp["Current S-Box"], name='Current S-Box'))
+            fig_comp.update_layout(barmode='group', height=400)
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+            # Kesimpulan Otomatis
+            if res['sac_avg'] < 0.50488 and res['nl_min'] >= 112:
+                st.success("✨ S-Box saat ini secara kriptografi LEBIH KUAT atau setara dibanding AES standar berdasarkan nilai SAC.")
+            else:
+                st.warning("⚠️ S-Box saat ini memiliki performa di bawah atau setara dengan AES standar.")

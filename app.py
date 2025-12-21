@@ -3,6 +3,7 @@ from ui.home_menu import home_menu
 from ui.affine_menu import affine_menu
 from ui.sbox_menu import sbox_menu
 from ui.sbox_testing import sbox_testing_menu
+from ui.aes_menu import aes_menu
 
 # Page configuration
 st.set_page_config(
@@ -89,8 +90,8 @@ with nav_col4:
         st.session_state.current_page = "testing"
 
 with nav_col5:
-    if st.button("📊 Documentation", use_container_width=True, key="nav_docs"):
-        st.session_state.current_page = "docs"
+    if st.button("🔐 AES Demo", use_container_width=True, key="nav_aes"):
+        st.session_state.current_page = "aes"
 
 with nav_col6:
     if st.button("ℹ️ About", use_container_width=True, key="nav_about"):
@@ -111,15 +112,9 @@ elif st.session_state.current_page == "sbox":
     sbox_menu()
 elif st.session_state.current_page == "testing":
     sbox_testing_menu()
-elif st.session_state.current_page == "docs":
-    st.header("📊 Documentation")
-    st.markdown("""
-    ### Dokumentasi Affine Matrix Encryption
-    
-    Halaman ini berisi dokumentasi lengkap mengenai Affine Matrix Encryption.
-    
-    Coming soon...
-    """)
+elif st.session_state.current_page == "aes":
+    aes_menu()
+
 elif st.session_state.current_page == "about":
     st.header("ℹ️ About")
     st.markdown("""

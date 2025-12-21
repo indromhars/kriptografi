@@ -227,8 +227,8 @@ def home_menu():
             st.rerun()
     
     with nav_col3:
-        if st.button("📚 Dokumentasi Lengkap", use_container_width=True):
-            st.session_state.current_page = "docs"
+        if st.button("🔐 AES Demo", use_container_width=True):
+            st.session_state.current_page = "aes"
             st.rerun()
     
     # Footer Info

@@ -1,4 +1,5 @@
 import numpy as np
+import math
 from itertools import product
 
 # =========================
@@ -90,3 +91,13 @@ def lap(sbox):
                 c += (-1) ** (ax ^ bx)
             max_lp = max(max_lp, abs(c))
     return max_lp / 256
+
+def calc_correlation(arr1, arr2):
+    """Menghitung koefisien korelasi (Ideal: 1.0 untuk hasil dekripsi)"""
+    return np.corrcoef(arr1.flatten(), arr2.flatten())[0, 1]
+
+def calc_psnr(arr1, arr2):
+    """Menghitung PSNR (Ideal: Infinity atau sangat tinggi)"""
+    mse = np.mean((arr1.astype(float) - arr2.astype(float)) ** 2)
+    if mse == 0: return float('inf')
+    return 20 * math.log10(255.0 / math.sqrt(mse))

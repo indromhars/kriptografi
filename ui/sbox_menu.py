@@ -354,6 +354,9 @@ def sbox_menu():
             # Save to session state for validation and export
             st.session_state.saved_first_row = first_row
             st.session_state.saved_constant = constant
+            # Clear any previous test results when configuration/index changes
+            if "test_results" in st.session_state:
+                del st.session_state["test_results"]
             
             display_affine_configuration(first_row, constant)
             
@@ -846,6 +849,9 @@ def sbox_menu():
                     'first_row': saved_first_row,
                     'matrix_rank': rank
                 }
+                # Clear previous test results because validation produced a (potentially) new S-box
+                if "test_results" in st.session_state:
+                    del st.session_state["test_results"]
             else:
                 st.warning("⚠️ Harap buat S-Box terlebih dahulu di tab 'Build S-Box'")
     
