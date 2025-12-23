@@ -285,9 +285,11 @@ def run_image_analysis_dynamic(arr, flat_padded, pad_len, engine, enc_bytes, h, 
 def aes_menu():
     st.header("🔐 AES Image Implementation with Custom S-Box")
     
-    # 1. Input S-Box Global
+    # 1. Siapkan List Pilihan S-Box
+    sbox_options = ["S-Box Aktif (dari Testing/Upload)", "Affine-derived S-Box", "S-Box44 (Jurnal)", "S-Box Standar (AES)"]
+    
     sbox_option = st.selectbox("Pilih S-Box Strategi:", 
-                              ("Affine-derived S-Box", "S-Box44 (Jurnal)", "S-Box Standar (AES)"),
+                              sbox_options,
                               key="main_sbox_sel")
 
     # AUTO RESET LOGIC: Jika S-Box diganti, hapus state gambar
@@ -297,8 +299,22 @@ def aes_menu():
             if k in st.session_state: del st.session_state[k]
         st.session_state.prev_sbox = sbox_option
 
-    affine_sbox = None
-    if sbox_option == "Affine-derived S-Box":
+    # --- LOGIKA PENENTUAN S-BOX ---
+    s_u = None
+    i_u = None
+
+    if sbox_option == "S-Box Aktif (dari Testing/Upload)":
+        if "validation_results" in st.session_state:
+            # Mengambil S-Box yang tersimpan di memori (dari Excel/Generator)
+            s_u = tuple(st.session_state.validation_results['sbox'])
+            i_u = generate_inverse_sbox(s_u)
+            source_info = st.session_state.validation_results.get('source', 'Generated')
+            st.info(f"✅ Menggunakan S-Box Aktif dari: **{source_info}**")
+        else:
+            st.error("❌ Belum ada S-Box aktif di memori. Silakan Upload Excel atau Generate S-Box di menu Testing/Affine terlebih dahulu.")
+            return # Berhenti jika tidak ada S-Box
+
+    elif sbox_option == "Affine-derived S-Box":
         dec = st.number_input("Affine First Row (decimal)", 0, 255, 7)
         const = st.number_input("Affine Constant (decimal)", 0, 255, 99)
         first_row = np.array(list(map(int, f"{dec:08b}")))
@@ -306,24 +322,71 @@ def aes_menu():
         affine = generate_affine_matrix(first_row)
         if gf2_rank(affine) != 8:
             st.error("Affine matrix tidak valid"); return
-        affine_sbox = build_sbox(affine, constant)
+        s_u = tuple(build_sbox(affine, constant))
+        i_u = generate_inverse_sbox(s_u)
+
+    elif sbox_option == "S-Box44 (Jurnal)":
+        s_u, i_u = SBOX_44, INV_SBOX_44
+    else:
+        s_u, i_u = SBOX_STANDARD, INV_SBOX_STANDARD
 
     tabs = st.tabs(["Text Demo", "Image Demo"])
 
     # --- TAB TEXT (Simplified) ---
+ # --- TAB TEXT (AES Demo) ---
     with tabs[0]:
-        key_t = st.text_input("Kunci (16 char)", value="kuncirahasia1234", key="tk")
-        pt_t = st.text_area("Plaintext", value="Halo AES Demo", key="tp")
-        if st.button("Encrypt Text"):
-            kh = binascii.hexlify(key_t.encode()).decode().upper()
-            ph = binascii.hexlify(pt_t.ljust(16)[:16].encode()).decode().upper()
-            if sbox_option == "Affine-derived S-Box":
-                eng = AESCoreCustom(kh, tuple(affine_sbox), generate_inverse_sbox(tuple(affine_sbox)))
-            elif sbox_option == "S-Box44 (Jurnal)":
-                eng = AESCoreCustom(kh, SBOX_44, INV_SBOX_44)
+        st.subheader("📝 Text Encryption & Decryption")
+        
+        key_t = st.text_input("Kunci (16 karakter)", value="kuncirahasia1234", key="tk")
+        
+        # --- Bagian Enkripsi ---
+        st.markdown("#### 🔒 Encryption")
+        pt_t = st.text_area("Masukkan Plaintext", value="Halo AES Demo", key="tp")
+        
+        if st.button("Encrypt Text", use_container_width=True):
+            if len(key_t) != 16:
+                st.error("Kunci harus tepat 16 karakter!")
             else:
-                eng = AESCoreCustom(kh, SBOX_STANDARD, INV_SBOX_STANDARD)
-            st.success(f"Ciphertext: {eng.encrypt(ph)}")
+                kh = binascii.hexlify(key_t.encode()).decode().upper()
+                # Padding manual agar pas 16 byte (1 blok)
+                ph = binascii.hexlify(pt_t.ljust(16)[:16].encode()).decode().upper()
+                
+                # Inisialisasi engine dengan S-Box terpilih
+                eng = AESCoreCustom(kh, sbox=s_u, inv_sbox=i_u)
+                cipher_result = eng.encrypt(ph)
+                
+                st.success("Teks Berhasil Dienkripsi!")
+                st.code(cipher_result, language="text")
+                st.info("💡 Salin kode di atas untuk mencoba fitur dekripsi di bawah.")
+
+        st.markdown("---")
+
+        # --- Bagian Dekripsi ---
+        st.markdown("#### 🔓 Decryption")
+        ct_t = st.text_input("Masukkan Ciphertext (Hex 32 karakter)", key="ct_input")
+        
+        if st.button("Decrypt Text", use_container_width=True):
+            if len(key_t) != 16:
+                st.error("Kunci harus tepat 16 karakter!")
+            elif len(ct_t) != 32:
+                st.error("Ciphertext harus 32 karakter Hex (16 byte)!")
+            else:
+                try:
+                    kh = binascii.hexlify(key_t.encode()).decode().upper()
+                    
+                    # Inisialisasi engine dengan S-Box terpilih (dan Inverse S-Box nya)
+                    eng = AESCoreCustom(kh, sbox=s_u, inv_sbox=i_u)
+                    
+                    # Proses dekripsi
+                    dec_hex = eng.decrypt(ct_t)
+                    # Konversi kembali dari Hex ke teks string
+                    dec_text = binascii.unhexlify(dec_hex).decode(errors='ignore')
+                    
+                    st.success("Teks Berhasil Didekripsi!")
+                    st.markdown(f"**Plaintext Hasil Dekripsi:**")
+                    st.info(dec_text)
+                except Exception as e:
+                    st.error(f"Gagal mendekripsi: Pastikan format Hex benar. (Error: {e})")
 
     # --- TAB IMAGE ---
     with tabs[1]:
@@ -352,14 +415,6 @@ def aes_menu():
             flat = arr.flatten()
             pad_len = (16 - (len(flat) % 16)) % 16
             flat_padded = np.pad(flat, (0, pad_len), mode='constant') if pad_len > 0 else flat
-
-            # Engine Setup
-            if sbox_option == "Affine-derived S-Box":
-                s_u, i_u = tuple(affine_sbox), generate_inverse_sbox(tuple(affine_sbox))
-            elif sbox_option == "S-Box44 (Jurnal)":
-                s_u, i_u = SBOX_44, INV_SBOX_44
-            else:
-                s_u, i_u = SBOX_STANDARD, INV_SBOX_STANDARD
             
             eng_img = SimpleAES_RGB(key_i, s_u, i_u)
 

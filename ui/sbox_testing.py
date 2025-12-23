@@ -371,11 +371,32 @@ def save_saved_tests_to_disk():
 
 def sbox_testing_menu():
     st.header("🧪 S-Box Testing dan Evaluasi Kriptografi")
-    
-    # Ensure persistent saved_tests loaded once per app run
     load_saved_tests_from_disk()
+
+    # --- HEADER: INFORMASI S-BOX AKTIF ---
+    if "validation_results" in st.session_state:
+        res_val = st.session_state.validation_results
+        
+        # GUNAKAN 'is not None' untuk mengecek array
+        if res_val.get('first_row') is not None:
+            bits = res_val['first_row']
+            # Konversi list/array bits menjadi desimal
+            decimal_idx = int("".join(map(str, bits)), 2)
+            display_name = f"Generated (Decimal Index: {decimal_idx})"
+        else:
+            display_name = res_val.get('source', 'Manual Upload')
+
+        st.success(f"📌 **S-Box Aktif:** {display_name}")
+        
+        if st.button("🗑️ Clear Current S-Box & Results"):
+            if "validation_results" in st.session_state: del st.session_state.validation_results
+            if "test_results" in st.session_state: del st.session_state.test_results
+            st.rerun()
+    else:
+        st.warning("⚠️ Belum ada S-Box yang dimuat untuk diuji.")
     
     testing_tabs = st.tabs([
+        "📥 Upload S-Box",
         "Quick Summary",
         "Detailed Analysis",
         "Visualizations",
@@ -385,166 +406,169 @@ def sbox_testing_menu():
     
     # Quick Summary Tab
     with testing_tabs[0]:
-        st.subheader("Quick Summary")
+        st.subheader("Upload S-Box via Excel")
+        st.write("Format Excel harus berisi 256 nilai dalam bentuk grid 16x16 atau 1 kolom tunggal.")
+        uploaded_file = st.file_uploader("Pilih file Excel", type=["xlsx", "xls"])
         
+        if uploaded_file is not None:
+            try:
+                df = pd.read_excel(uploaded_file, header=None)
+                flat_list = df.values.flatten().tolist()
+                cleaned_list = [int(x) for x in flat_list if pd.notnull(x) and isinstance(x, (int, float, np.integer))]
+                
+                if len(cleaned_list) >= 256:
+                    sbox_to_load = cleaned_list[:256]
+                    
+                    st.markdown("### Preview S-Box")
+
+                    # 1. Tambahkan pilihan format tampilan
+                    view_mode = st.radio(
+                        "Pilih Format Tampilan:",
+                        ["Decimal (0-255)", "Hexadecimal (00-FF)"],
+                        horizontal=True
+                    )
+
+                    # 2. Reshape data menjadi 16x16
+                    grid_data = np.array(sbox_to_load).reshape(16, 16)
+                    
+                    # 3. Buat label index (00-F0) dan kolom (0-F)
+                    labels_hex = [f"{i:X}" for i in range(16)]      # ['0', '1', ..., 'F']
+                    rows_hex = [f"{i:X}0" for i in range(16)]      # ['00', '10', ..., 'F0']
+                    
+                    # 4. Logika pemilihan format
+                    if view_mode == "Hexadecimal (00-FF)":
+                        # Tampilkan sebagai HEX
+                        df_preview = pd.DataFrame(grid_data, index=rows_hex, columns=labels_hex).map(lambda x: f"{x:02X}")
+                    else:
+                        # Tampilkan sebagai DESIMAL (asli dari Excel)
+                        df_preview = pd.DataFrame(grid_data, index=rows_hex, columns=labels_hex)
+                    
+                    # 5. Tampilkan tabel (height=590 agar semua baris terlihat)
+                    st.dataframe(df_preview, use_container_width=True, height=590)
+
+                    if st.button("🚀 Konfirmasi & Gunakan S-Box ini untuk Testing"):
+                        # Reset hasil tes lama agar tidak rancu
+                        if "test_results" in st.session_state:
+                            del st.session_state.test_results
+                        
+                        st.session_state.validation_results = {
+                            'sbox': sbox_to_load,
+                            'source': f"Uploaded File: {uploaded_file.name}", 
+                            'first_row': None 
+                        }
+                        st.success("✅ S-Box berhasil dimuat!")
+            except Exception as e:
+                st.error(f"Terjadi kesalahan pembacaan: {e}")
+
+    # Quick Summary Tab
+    with testing_tabs[1]:
+        st.subheader("Quick Summary Analysis")
         if "validation_results" not in st.session_state:
-            st.info("💡 Jalankan validasi terlebih dahulu di menu 'S-Box' → 'Validation'")
+            st.info("💡 Unggah S-Box di tab 'Upload S-Box' atau buat S-Box di menu Generation terlebih dahulu.")
         else:
             sbox_values = st.session_state.validation_results['sbox']
-            
-            if st.button("🔍 Run Comprehensive Tests", key="run_tests"):
-                with st.spinner("Melakukan pengujian komprehensif..."):
-                    # 1. Validasi Dasar
+            if st.button("🔍 Run Comprehensive Tests", key="run_tests_main"):
+                with st.spinner("Menghitung parameter..."):
                     is_bijective, unique_count = validate_sbox_bijective(sbox_values)
-                    
-                    # 2. Nonlinearity
                     nonlinearity = calculate_nonlinearity(sbox_values)
-                    
-                    # 3. BIC-NL
                     bic_nl = calculate_bic_nl(sbox_values)
-                    
-                    # 4. LAT dan LAP
                     lat = build_linear_approximation_table(sbox_values)
-                    lap_result = calculate_lap(lat)
-                    
-                    # 5. DDT dan Differential Metrics
+                    lap_res, max_lat = calculate_lap(lat)
                     ddt = build_difference_distribution_table(sbox_values)
-                    dap_result = calculate_dap(ddt)
-                    
-                    # 6. SAC dan Avalanche
-                    sac_result = calculate_sac(sbox_values)
-                    avalanche = calculate_avalanche_degree(sbox_values)
-                    
-                    # 7. BIC-SAC
+                    dap_res, du = calculate_dap(ddt)
+                    sac_res, sac_per_bit, sac_matrix = calculate_sac(sbox_values)
                     bic_sac = calculate_bic_sac(sbox_values)
-                    
-                    # 7.5 Final S score (new)
-                    avg_sac = sac_result[0]
-                    s_value = calculate_final_score(avg_sac, bic_sac)
-                    
-                    # 8. Transparency Order
-                    to_result = calculate_transparency_order(sbox_values)
-                    
-                    # 9. Correlation Immunity
+                    s_score = calculate_final_score(sac_res, bic_sac)
+                    ad_avg, ad_list = calculate_avalanche_degree(sbox_values)
+                    to_res, to_list = calculate_transparency_order(sbox_values)
                     ci = calculate_correlation_immunity(sbox_values)
-                    
-                    # Simpan hasil (inklud S)
+
                     st.session_state.test_results = {
-                        'bijective': is_bijective,
-                        'nonlinearity': nonlinearity,
-                        'bic_nl': bic_nl,
-                        'lat': lat,
-                        'lap': lap_result,
-                        'ddt': ddt,
-                        'dap': dap_result,
-                        'sac': sac_result,
-                        'avalanche': avalanche,
-                        'bic_sac': bic_sac,
-                        's_value': s_value,                # <-- new
-                        'transparency_order': to_result,
-                        'correlation_immunity': ci
+                        'bijective': is_bijective, 'unique_count': unique_count, 'nonlinearity': nonlinearity,
+                        'bic_nl': bic_nl, 'lap': (lap_res, max_lat), 'dap': (dap_res, du),
+                        'sac': (sac_res, sac_per_bit, sac_matrix), 'bic_sac': bic_sac, 's_value': s_score,
+                        'avalanche': (ad_avg, ad_list), 'transparency_order': (to_res, to_list), 'correlation_immunity': ci
                     }
-                
-                # Save a summary of the results for comparison
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                saved_tests = st.session_state.get("saved_tests", [])
-                # determine decimal index of the first_row if available
-                first_row = st.session_state.get('validation_results', {}).get('first_row')
-                decimal_index = int("".join(map(str, first_row)), 2) if first_row is not None else None
-                saved_tests.append({
-                    "decimal": decimal_index,
-                    "s_value": s_value,
-                    "nl": nonlinearity[0],
-                    "du": dap_result[1],
-                    "to": float(to_result[0]),
-                    "lap": lap_result[0],
-                    "sac": float(sac_result[0]),
-                    "timestamp": timestamp
-                })
-                st.session_state.saved_tests = saved_tests
-                save_saved_tests_to_disk()
-
-                # Display Results
-                st.markdown("### ✅ Validasi Dasar")
-                if is_bijective:
-                    st.success(f"✅ S-Box adalah BIJECTIVE (Unique values: {unique_count})")
-                else:
-                    st.error(f"❌ S-Box BUKAN bijective (Unique values: {unique_count})")
-                
-                st.markdown("### 📊 Core Metrics")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    nl, avg_nl, _ = nonlinearity
-                    st.metric("Nonlinearity (NL)", f"{nl}")
-                    st.metric("BIC-NL", f"{bic_nl}")
-                    st.metric("LAP", f"{lap_result[0]:.6f}")
-                    st.metric("CI", f"{ci}")
-                
-                with col2:
-                    avg_sac = sac_result[0]
-                    st.metric("SAC", f"{avg_sac:.6f}")
-                    st.metric("BIC-SAC", f"{bic_sac:.6f}")
-                    st.metric("DAP", f"{dap_result[0]:.6f}")
-                
-                with col3:
-                    du = dap_result[1]
-                    avg_ad, _ = avalanche
-                    avg_to, _ = to_result
-                    st.metric("DU", f"{du}")
-                    st.metric("AD", f"{avg_ad:.6f}")
-                    st.metric("TO", f"{avg_to:.6f}")
                     
+                    saved = st.session_state.get("saved_tests", [])
+                    row = st.session_state.validation_results.get('first_row')
+                    label = int("".join(map(str, row)), 2) if row is not None else "Uploaded"
+                    saved.append({
+                        "decimal": label, "s_value": s_score, "nl": nonlinearity[0],
+                        "du": du, "lap": lap_res, "sac": float(sac_res),
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    st.session_state.saved_tests = saved
+                    save_saved_tests_to_disk()
+                st.rerun()
 
-                # Display Final S score under Strength Assessment
-                st.markdown("---")
-                st.metric("Final S Score (lower is better)", f"{s_value:.6f}")
-
-                st.markdown("---")
-                st.markdown("### 📈 Strength Assessment")
-                
-                metrics = {
-                    'nonlinearity': nonlinearity,
-                    'bic_nl': bic_nl,
-                    'lap': lap_result,
-                    'dap': dap_result,
-                    'sac': sac_result,
-                    'avalanche': avalanche,
-                    'bic_sac': bic_sac,
-                    'transparency_order': to_result,
-                    'correlation_immunity': ci
-                }
-                
-                sv_paper, extended_score, excellent_count = calculate_strength_values(metrics)
-                
-                assess_col1, assess_col2, assess_col3 = st.columns(3)
-                
-                with assess_col1:
-                    st.metric("SV (Paper)", f"{sv_paper:.6f}")
-                
-                with assess_col2:
-                    st.metric("Extended Score", f"{extended_score:.6f}")
-                
-                with assess_col3:
-                    st.metric("Excellent Criteria", f"{excellent_count}/7")
-                
-                if excellent_count >= 6:
-                    st.success(f"✅ **EXCELLENT** - {excellent_count}/7")
-                elif excellent_count >= 4:
-                    st.info(f"✅ **GOOD** - {excellent_count}/7")
-                elif excellent_count >= 2:
-                    st.warning(f"⚠️ **FAIR** - {excellent_count}/7")
+            if "test_results" in st.session_state:
+                res = st.session_state.test_results
+                st.markdown("### ✅ Validasi Dasar")
+                if res['bijective']:
+                    st.success(f"✅ S-Box adalah BIJECTIVE (Unique values: {res['unique_count']})")
                 else:
-                    st.error(f"❌ **POOR** - {excellent_count}/7")
+                    st.error(f"❌ S-Box BUKAN bijective (Unique values: {res['unique_count']})")
                 
-                # Download Results
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.metric("Nonlinearity (NL)", res['nonlinearity'][0])
+                    st.metric("BIC-NL", res['bic_nl'])
+                    st.metric("LAP", f"{res['lap'][0]:.6f}")
+                with c2:
+                    st.metric("SAC", f"{res['sac'][0]:.6f}")
+                    st.metric("BIC-SAC", f"{res['bic_sac']:.6f}")
+                    st.metric("DAP", f"{res['dap'][0]:.6f}")
+                with c3:
+                    st.metric("DU (Uniformity)", res['dap'][1])
+                    st.metric("AD (Avalanche)", f"{res['avalanche'][0]:.6f}")
+                    st.metric("CI (Immunity)", res['correlation_immunity'])
+
+                st.markdown("---")
+                st.metric("Final S Score (lower is better)", f"{res['s_value']:.6f}")
+
+                # --- PERBAIKAN STRENGTH ASSESSMENT ---
+                metrics_for_sv = {
+                    'nonlinearity': res['nonlinearity'],
+                    'bic_nl': res['bic_nl'],
+                    'lap': res['lap'],
+                    'dap': res['dap'],
+                    'sac': res['sac'],
+                    'avalanche': res['avalanche'],
+                    'bic_sac': res['bic_sac'],
+                    'transparency_order': res['transparency_order'],
+                    'correlation_immunity': res['correlation_immunity']
+                }
+                sv_p, ext_s, exc_c = calculate_strength_values(metrics_for_sv)
+                st.markdown("### 📈 Strength Assessment")
+                a1, a2, a3 = st.columns(3)
+                a1.metric("SV (Paper)", f"{sv_p:.4f}")
+                a2.metric("Extended Score", f"{ext_s:.4f}")
+                a3.metric("Excellent Criteria", f"{exc_c}/7")
+
+                # --- PERBAIKAN DOWNLOAD RESULTS ---
                 st.markdown("---")
                 st.markdown("### 📥 Download Results")
                 
+                # Ekstrak variabel dari res untuk f-string laporan agar tidak error UnboundLocalError
+                is_bijective = res['bijective']
+                unique_count = res['unique_count']
+                nl = res['nonlinearity'][0]
+                avg_nl = res['nonlinearity'][1]
+                bic_nl = res['bic_nl']
+                lap_val = res['lap'][0]
+                max_lat = res['lap'][1]
+                du = res['dap'][1]
+                dap_val = res['dap'][0]
+                avg_sac = res['sac'][0]
+                bic_sac = res['bic_sac']
+                avg_ad = res['avalanche'][0]
+                avg_to = res['transparency_order'][0]
+                ci = res['correlation_immunity']
+                s_value = res['s_value']
+
                 report_text = f"""S-Box Cryptographic Evaluation Report
 =====================================
-
 1. BASIC VALIDATION
 -------------------
 Bijective Property: {'YES' if is_bijective else 'NO'}
@@ -559,13 +583,13 @@ Average NL: {avg_nl:.6f}
 
 3. LINEAR RESISTANCE
 -------------------
-Linear Approximation Probability (LAP): {lap_result[0]:.6f}
-Max LAT Value: {lap_result[1]}
+Linear Approximation Probability (LAP): {lap_val:.6f}
+Max LAT Value: {max_lat}
 
 4. DIFFERENTIAL RESISTANCE
 -------------------------
 Differential Uniformity (DU): {du}
-Differential Approximation Probability (DAP): {dap_result[0]:.6f}
+Differential Approximation Probability (DAP): {dap_val:.6f}
 
 5. AVALANCHE PROPERTIES
 ---------------------
@@ -583,19 +607,17 @@ Correlation Immunity (CI): {ci}
 
 8. STRENGTH ASSESSMENT
 ---------------------
-SV (Paper Formula): {sv_paper:.6f}
-Extended Score: {extended_score:.6f}
-Excellent Criteria: {excellent_count}/7
+SV (Paper Formula): {sv_p:.6f}
+Extended Score: {ext_s:.6f}
+Excellent Criteria: {exc_c}/7
 
 9. FINAL SCORE
 --------------
 S (|SAC-0.5| + |BIC_SAC-0.5|) / 2 = {s_value:.6f}
-
 INTERPRETATION
 ==============
 [See 'Interpretasi' tab for detailed analysis]
-"""
-                
+"""           
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -610,14 +632,14 @@ INTERPRETATION
                     json_report = {
                         "basic": {"bijective": is_bijective, "unique_values": unique_count},
                         "nonlinearity": {"nl": int(nl), "bic_nl": int(bic_nl), "avg_nl": float(avg_nl)},
-                        "linear_resistance": {"lap": float(lap_result[0]), "max_lat": int(lap_result[1])},
-                        "differential_resistance": {"du": int(du), "dap": float(dap_result[0])},
+                        "linear_resistance": {"lap": float(res['lap'][0]), "max_lat": int(res['lap'][1])},
+                        "differential_resistance": {"du": int(du), "dap": float(res['dap'][0])},
                         "avalanche": {"sac": float(avg_sac), "bic_sac": float(bic_sac), "ad": float(avg_ad)},
                         "side_channel": {"to": float(avg_to)},
                         "statistical": {"ci": int(ci)},
-                        "strength": {"sv_paper": float(sv_paper), "extended_score": float(extended_score), "excellent_criteria": excellent_count},
-                        "final_score": {"S": float(s_value)}   # <-- new
-                    }
+                        "strength": {"sv_paper": float(sv_p), "extended_score": float(ext_s), "excellent_criteria": exc_c},
+                        "final_score": {"S": float(res['s_value'])}
+                    } 
                     
                     st.download_button(
                         label="📥 Download Report (.json)",
@@ -625,10 +647,9 @@ INTERPRETATION
                         file_name="sbox_evaluation_report.json",
                         mime="application/json"
                     )
-            
     
     # Detailed Analysis Tab
-    with testing_tabs[1]:
+    with testing_tabs[2]:
         st.subheader("Detailed Test Results")
         
         if "test_results" not in st.session_state:
@@ -730,7 +751,7 @@ INTERPRETATION
                 st.info("Standard AES: 0.015625 (DU=4). Smaller is better.")
 
     # --- VISUALIZATIONS TAB (REPLACEMENT) ---
-    with testing_tabs[2]:
+    with testing_tabs[3]:
         st.header("📈 Visualisasi Hasil Pengujian")
         
         if "test_results" not in st.session_state:
@@ -877,7 +898,7 @@ INTERPRETATION
                 st.caption("Catatan: Grafik probabilitas menggunakan skala Logaritmik.")
     
     # Interpretasi Tab
-    with testing_tabs[3]:
+    with testing_tabs[4]:
         st.subheader("Interpretasi Hasil Pengujian")
         
         if "test_results" not in st.session_state:

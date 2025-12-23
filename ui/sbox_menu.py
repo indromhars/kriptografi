@@ -869,7 +869,7 @@ def sbox_menu():
             
             export_format = st.radio(
                 "Pilih format export:",
-                ["Python List", "C Array", "Hex Values", "Binary Values", "JSON", "CSV"]
+                ["Python List", "C Array", "Hex Values", "Binary Values", "JSON", "CSV", "Excel"]
             )
             
             st.markdown("---")
@@ -943,6 +943,14 @@ def sbox_menu():
                 
                 st.text_area("CSV Data:", value=csv_output, height=150, disabled=True)
             
+            elif export_format == "Excel":
+                st.markdown("#### Excel Format (16x16 Grid)")
+                sbox_matrix = np.array(sbox_values).reshape(16, 16)
+                cols = [f"{i:X}" for i in range(16)] 
+                df_preview = pd.DataFrame(sbox_matrix, columns=cols)
+                st.write("Preview data:")
+                st.dataframe(df_preview, use_container_width=True, hide_index=True)
+
             # Download buttons
             st.markdown("---")
             st.markdown("### Download")
@@ -1039,6 +1047,23 @@ def sbox_menu():
                         data=csv_output,
                         file_name="sbox.csv",
                         mime="text/csv"
+                    )
+            
+            elif export_format == "Excel":
+                    import io
+                    output = io.BytesIO()
+                    sbox_matrix_dl = np.array(sbox_values).reshape(16, 16)
+                    
+                    df_to_save = pd.DataFrame(sbox_matrix_dl) 
+
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df_to_save.to_excel(writer, sheet_name='S-Box', index=False, header=False) 
+                    
+                    st.download_button(
+                        label="📥 Download .xlsx",
+                        data=output.getvalue(),
+                        file_name="sbox.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
         
         else:
